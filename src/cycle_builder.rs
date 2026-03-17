@@ -17,6 +17,7 @@ fn shuffle_u32(values: &mut [u32], seed: u64) {
     }
 }
 
+// Builds one randomized cycle spanning all elements so traversal cannot get stuck in tiny hot loops.
 pub fn build_single_cycle(working_set_bytes: u64, seed: u64) -> Option<Vec<u32>> {
     let element_size = std::mem::size_of::<u32>() as u64;
     let n_u64 = working_set_bytes / element_size;

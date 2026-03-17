@@ -1,3 +1,4 @@
+// Pins the current process/thread to a specific Linux CPU core using sched_setaffinity.
 pub fn pin_to_core(core_id: usize) -> Result<(), std::io::Error> {
     let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
     unsafe {

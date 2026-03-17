@@ -17,6 +17,7 @@ use timing::run_adaptive_trial;
 use types::{AggregateRow, TrialRow};
 
 fn run_sweep(config: &Config, sizes: &[u64]) -> (Vec<TrialRow>, Vec<AggregateRow>) {
+    // Runs one warmup phase plus timed trials for each size, then records median cycles/access.
     let mut raw_rows = Vec::new();
     let mut aggregate_rows = Vec::new();
 

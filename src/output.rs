@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// Rewrites result artifacts under results/ on every run.
 pub fn write_results(
     config: &Config,
     pin_ok: bool,

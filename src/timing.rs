@@ -1,3 +1,4 @@
+// Reads the TSC at trial start with an lfence to tighten ordering around the timestamp.
 fn read_tsc_start() -> u64 {
     unsafe {
         core::arch::x86_64::_mm_lfence();
@@ -5,6 +6,7 @@ fn read_tsc_start() -> u64 {
     }
 }
 
+// Reads the TSC at trial end with an lfence to reduce boundary reordering noise.
 fn read_tsc_end() -> u64 {
     unsafe {
         core::arch::x86_64::_mm_lfence();
@@ -19,6 +21,7 @@ fn chase(next: &[u32], mut idx: u32, accesses: u64) -> u32 {
     std::hint::black_box(idx)
 }
 
+// Executes pointer chasing in chunks until a minimum cycle budget is reached.
 pub fn run_adaptive_trial(
     next: &[u32],
     start_idx: u32,

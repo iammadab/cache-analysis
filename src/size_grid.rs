@@ -1,3 +1,4 @@
+// Builds a working-set schedule with powers of two and one midpoint between each adjacent pair.
 pub fn build_sizes(min_bytes: u64, max_bytes: u64) -> Vec<u64> {
     let mut powers = Vec::new();
     let mut value = min_bytes;

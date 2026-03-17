@@ -1,3 +1,4 @@
+// Returns the median after sorting in place; for even counts it averages the two middle values.
 pub fn median_f64(values: &mut [f64]) -> f64 {
     values.sort_by(|a, b| a.partial_cmp(b).expect("no NaN values expected"));
     let mid = values.len() / 2;

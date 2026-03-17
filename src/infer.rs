@@ -61,6 +61,7 @@ fn class_name(class: KneeClass) -> &'static str {
     }
 }
 
+// Formats byte sizes for readable report output.
 fn fmt_size(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = 1024.0 * 1024.0;
@@ -73,6 +74,7 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
+// Computes adjacent latency ratios (next/current) and keeps the left index.
 fn compute_adjacent_ratios(rows: &[AggregateRow]) -> Vec<(usize, f64)> {
     let mut ratios = Vec::with_capacity(rows.len().saturating_sub(1));
     for i in 0..rows.len().saturating_sub(1) {
@@ -84,6 +86,7 @@ fn compute_adjacent_ratios(rows: &[AggregateRow]) -> Vec<(usize, f64)> {
     ratios
 }
 
+// Derives data-driven knee thresholds from the ratio distribution.
 fn compute_thresholds(ratios: &[f64]) -> Option<Thresholds> {
     if ratios.is_empty() {
         return None;
@@ -108,6 +111,7 @@ fn compute_thresholds(ratios: &[f64]) -> Option<Thresholds> {
     })
 }
 
+// Classifies each adjacent ratio as minor/major knee candidate.
 fn classify_knee_points(adjacents: &[(usize, f64)], thresholds: Thresholds) -> Vec<KneePoint> {
     let mut points = Vec::new();
     for (index, ratio) in adjacents {
@@ -128,6 +132,7 @@ fn classify_knee_points(adjacents: &[(usize, f64)], thresholds: Thresholds) -> V
     points
 }
 
+// Merges neighboring knee points into wider transition zones.
 fn merge_knee_points(points: &[KneePoint]) -> Vec<KneeZone> {
     let mut zones = Vec::<KneeZone>::new();
 
@@ -156,6 +161,7 @@ fn merge_knee_points(points: &[KneePoint]) -> Vec<KneeZone> {
     zones
 }
 
+// Converts knee zones into contiguous hierarchy-like regions.
 fn infer_regions(rows: &[AggregateRow], zones: &[KneeZone]) -> Vec<Region> {
     let labels = ["L1-like", "L2-like", "LLC-like", "DRAM-like"];
     let mut boundaries = Vec::with_capacity(3);
@@ -187,6 +193,7 @@ fn infer_regions(rows: &[AggregateRow], zones: &[KneeZone]) -> Vec<Region> {
     regions
 }
 
+// Runs the full inference pipeline and returns structured results.
 fn build_inference(rows: &[AggregateRow]) -> Option<InferenceResult> {
     let adjacents = compute_adjacent_ratios(rows);
     let ratio_values: Vec<f64> = adjacents.iter().map(|(_, ratio)| *ratio).collect();
@@ -207,6 +214,7 @@ fn build_inference(rows: &[AggregateRow]) -> Option<InferenceResult> {
     })
 }
 
+// Prints a human-readable inference report from aggregate latency data.
 pub fn print_latency_inference_report(aggregate_rows: &[AggregateRow]) {
     println!("Latency Inference Report");
 

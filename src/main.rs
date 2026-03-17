@@ -23,7 +23,7 @@ fn run_sweep(config: &Config, sizes: &[u64]) -> (Vec<TrialRow>, Vec<AggregateRow
     let mut raw_rows = Vec::new();
     let mut aggregate_rows = Vec::new();
 
-    println!("v4_full_sweep:");
+    println!("full_sweep:");
     println!("chunk_accesses={}", config.chunk_accesses);
     println!("target_cycles={}", config.target_cycles);
     println!("warmup_trials={}", config.warmup_trials);
@@ -77,7 +77,7 @@ fn main() {
 
     let sizes = build_sizes(config.min_bytes, config.max_bytes);
 
-    println!("Latency V5");
+    println!("Latency Run");
     println!("min_bytes={}", config.min_bytes);
     println!("max_bytes={}", config.max_bytes);
     println!("trials={}", config.trials);

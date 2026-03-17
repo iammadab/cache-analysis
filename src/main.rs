@@ -2,7 +2,6 @@ const MIN_BYTES: u64 = 4 * 1024;
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
 const TRIALS: u32 = 9;
 const SEED: u64 = 0xC0FFEE;
-const V2_TRIAL_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 const CHUNK_ACCESSES: u64 = 65_536;
 const TARGET_CYCLES: u64 = 200_000_000;
 const PIN_CORE: usize = 0;
@@ -108,6 +107,16 @@ fn run_adaptive_trial(next: &[u32], start_idx: u32) -> (u64, u64, u32) {
     }
 }
 
+fn median_f64(values: &mut [f64]) -> f64 {
+    values.sort_by(|a, b| a.partial_cmp(b).expect("no NaN values expected"));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 1 {
+        values[mid]
+    } else {
+        (values[mid - 1] + values[mid]) / 2.0
+    }
+}
+
 fn pin_to_core(core_id: usize) -> Result<(), std::io::Error> {
     let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
     unsafe {
@@ -136,7 +145,7 @@ fn main() {
 
     let sizes = build_sizes(MIN_BYTES, MAX_BYTES);
 
-    println!("Latency V3");
+    println!("Latency V4");
     println!("min_bytes={MIN_BYTES}");
     println!("max_bytes={MAX_BYTES}");
     println!("trials={TRIALS}");
@@ -149,18 +158,25 @@ fn main() {
 
     println!("total_sizes={}", sizes.len());
 
-    let next = build_single_cycle(V2_TRIAL_SIZE_BYTES, SEED).expect("valid v2 trial cycle");
-    let (accesses_done, elapsed_cycles, end_idx) = run_adaptive_trial(&next, 0);
-    let cycles_per_access = elapsed_cycles as f64 / accesses_done as f64;
-
-    println!("v3_single_trial:");
-    println!("size_bytes={V2_TRIAL_SIZE_BYTES}");
+    println!("v4_full_sweep:");
     println!("chunk_accesses={CHUNK_ACCESSES}");
     println!("target_cycles={TARGET_CYCLES}");
-    println!("accesses={accesses_done}");
-    println!("elapsed_cycles={elapsed_cycles}");
-    println!("cycles_per_access={cycles_per_access:.4}");
-    println!("end_idx={end_idx}");
+    println!("warmup_trials=1");
+
+    for size_bytes in sizes {
+        let next = build_single_cycle(size_bytes, SEED).expect("valid cycle");
+
+        let _ = run_adaptive_trial(&next, 0);
+
+        let mut trial_cpa = Vec::with_capacity(TRIALS as usize);
+        for _ in 0..TRIALS {
+            let (accesses_done, elapsed_cycles, _) = run_adaptive_trial(&next, 0);
+            trial_cpa.push(elapsed_cycles as f64 / accesses_done as f64);
+        }
+
+        let median_cpa = median_f64(&mut trial_cpa);
+        println!("size_bytes={} median_cpa={:.4}", size_bytes, median_cpa);
+    }
 }
 
 #[cfg(test)]

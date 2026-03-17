@@ -2,6 +2,8 @@ const MIN_BYTES: u64 = 4 * 1024;
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
 const TRIALS: u32 = 9;
 const SEED: u64 = 0xC0FFEE;
+const V2_TRIAL_SIZE_BYTES: u64 = 4 * 1024 * 1024;
+const V2_ACCESS_COUNT: u64 = 20_000_000;
 
 // Builds a working-set grid with powers of two plus one midpoint between each pair.
 fn build_sizes(min_bytes: u64, max_bytes: u64) -> Vec<u64> {
@@ -67,10 +69,31 @@ fn build_single_cycle(working_set_bytes: u64, seed: u64) -> Option<Vec<u32>> {
     Some(next)
 }
 
+fn read_tsc_start() -> u64 {
+    unsafe {
+        core::arch::x86_64::_mm_lfence();
+        core::arch::x86_64::_rdtsc()
+    }
+}
+
+fn read_tsc_end() -> u64 {
+    unsafe {
+        core::arch::x86_64::_mm_lfence();
+        core::arch::x86_64::_rdtsc()
+    }
+}
+
+fn chase(next: &[u32], mut idx: u32, accesses: u64) -> u32 {
+    for _ in 0..accesses {
+        idx = next[idx as usize];
+    }
+    std::hint::black_box(idx)
+}
+
 fn main() {
     let sizes = build_sizes(MIN_BYTES, MAX_BYTES);
 
-    println!("Latency V0");
+    println!("Latency V2");
     println!("min_bytes={MIN_BYTES}");
     println!("max_bytes={MAX_BYTES}");
     println!("trials={TRIALS}");
@@ -82,6 +105,20 @@ fn main() {
     }
 
     println!("total_sizes={}", sizes.len());
+
+    let next = build_single_cycle(V2_TRIAL_SIZE_BYTES, SEED).expect("valid v2 trial cycle");
+    let start = read_tsc_start();
+    let end_idx = chase(&next, 0, V2_ACCESS_COUNT);
+    let end = read_tsc_end();
+    let elapsed_cycles = end - start;
+    let cycles_per_access = elapsed_cycles as f64 / V2_ACCESS_COUNT as f64;
+
+    println!("v2_single_trial:");
+    println!("size_bytes={V2_TRIAL_SIZE_BYTES}");
+    println!("accesses={V2_ACCESS_COUNT}");
+    println!("elapsed_cycles={elapsed_cycles}");
+    println!("cycles_per_access={cycles_per_access:.4}");
+    println!("end_idx={end_idx}");
 }
 
 #[cfg(test)]

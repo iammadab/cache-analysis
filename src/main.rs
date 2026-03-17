@@ -67,29 +67,6 @@ fn build_single_cycle(working_set_bytes: u64, seed: u64) -> Option<Vec<u32>> {
     Some(next)
 }
 
-fn is_single_cycle(next: &[u32]) -> bool {
-    if next.len() < 2 {
-        return false;
-    }
-
-    let n = next.len();
-    let mut idx = 0usize;
-
-    for step in 1..=n {
-        let next_idx = next[idx] as usize;
-        if next_idx >= n {
-            return false;
-        }
-
-        idx = next_idx;
-        if idx == 0 {
-            return step == n;
-        }
-    }
-
-    false
-}
-
 fn main() {
     let sizes = build_sizes(MIN_BYTES, MAX_BYTES);
 
@@ -105,17 +82,38 @@ fn main() {
     }
 
     println!("total_sizes={}", sizes.len());
+}
 
-    println!("v1_cycle_check:");
-    for size in sizes {
-        let element_count = (size / std::mem::size_of::<u32>() as u64) as usize;
-        let cycle_ok = build_single_cycle(size, SEED)
-            .map(|next| is_single_cycle(&next))
-            .unwrap_or(false);
+#[cfg(test)]
+mod tests {
+    use super::{build_single_cycle, build_sizes};
 
-        println!(
-            "size_bytes={} elements={} cycle_ok={}",
-            size, element_count, cycle_ok
-        );
+    #[test]
+    fn single_cycle_visits_all_elements_once() {
+        let size_bytes = 4 * 1024;
+        let next = build_single_cycle(size_bytes, 0xC0FFEE).expect("valid cycle");
+        let n = next.len();
+        let mut seen = vec![false; n];
+        let mut idx = 0usize;
+
+        for _ in 0..n {
+            assert!(!seen[idx]);
+            seen[idx] = true;
+            idx = next[idx] as usize;
+            assert!(idx < n);
+        }
+
+        assert_eq!(idx, 0);
+        assert!(seen.into_iter().all(|x| x));
+    }
+
+    #[test]
+    fn size_grid_is_strictly_increasing() {
+        let sizes = build_sizes(4 * 1024, 512 * 1024 * 1024);
+        assert!(!sizes.is_empty());
+
+        for pair in sizes.windows(2) {
+            assert!(pair[0] < pair[1]);
+        }
     }
 }

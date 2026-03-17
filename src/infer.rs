@@ -6,17 +6,41 @@ enum KneeClass {
     Major,
 }
 
+#[derive(Clone, Copy)]
 struct KneePoint {
     index: usize,
     ratio: f64,
     class: KneeClass,
 }
 
+#[derive(Clone, Copy)]
 struct KneeZone {
-    from_size: u64,
-    to_size: u64,
+    start_index: usize,
+    end_index: usize,
     peak_ratio: f64,
     class: KneeClass,
+}
+
+#[derive(Clone, Copy)]
+struct Thresholds {
+    p50: f64,
+    p90: f64,
+    p97: f64,
+    minor: f64,
+    major: f64,
+}
+
+#[derive(Clone, Copy)]
+struct Region {
+    label: &'static str,
+    from_size: u64,
+    to_size: u64,
+}
+
+struct InferenceResult {
+    thresholds: Thresholds,
+    zones: Vec<KneeZone>,
+    regions: Vec<Region>,
 }
 
 fn nearest_rank_percentile(mut values: Vec<f64>, percentile: u32) -> Option<f64> {
@@ -49,72 +73,68 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
-pub fn print_latency_inference_report(aggregate_rows: &[AggregateRow]) {
-    if aggregate_rows.len() < 2 {
-        println!("Latency Inference Report");
-        println!("insufficient points for inference");
-        return;
-    }
-
-    let mut ratios = Vec::with_capacity(aggregate_rows.len() - 1);
-    for i in 0..(aggregate_rows.len() - 1) {
-        let current = aggregate_rows[i].median_cpa;
-        let next = aggregate_rows[i + 1].median_cpa;
+fn compute_adjacent_ratios(rows: &[AggregateRow]) -> Vec<(usize, f64)> {
+    let mut ratios = Vec::with_capacity(rows.len().saturating_sub(1));
+    for i in 0..rows.len().saturating_sub(1) {
+        let current = rows[i].median_cpa;
         if current > 0.0 {
-            ratios.push(next / current);
+            ratios.push((i, rows[i + 1].median_cpa / current));
         }
     }
+    ratios
+}
 
+fn compute_thresholds(ratios: &[f64]) -> Option<Thresholds> {
     if ratios.is_empty() {
-        println!("Latency Inference Report");
-        println!("no valid adjacent ratios for inference");
-        return;
+        return None;
     }
 
-    let p50 = nearest_rank_percentile(ratios.clone(), 50).expect("non-empty ratios");
-    let p90 = nearest_rank_percentile(ratios.clone(), 90).expect("non-empty ratios");
-    let p97 = nearest_rank_percentile(ratios.clone(), 97).expect("non-empty ratios");
+    let p50 = nearest_rank_percentile(ratios.to_vec(), 50)?;
+    let p90 = nearest_rank_percentile(ratios.to_vec(), 90)?;
+    let p97 = nearest_rank_percentile(ratios.to_vec(), 97)?;
 
     // Thresholds are data-driven from the current run's ratio distribution.
     // We use P90 as the minor knee floor and P97 as the major knee floor,
     // then enforce a minimum separation so major knees remain meaningfully stronger.
-    let minor_threshold = p90.max(1.10);
-    let major_threshold = p97.max(minor_threshold + 0.10);
+    let minor = p90.max(1.10);
+    let major = p97.max(minor + 0.10);
 
-    let mut knee_points = Vec::new();
-    for i in 0..(aggregate_rows.len() - 1) {
-        let current = aggregate_rows[i].median_cpa;
-        if current <= 0.0 {
-            continue;
-        }
+    Some(Thresholds {
+        p50,
+        p90,
+        p97,
+        minor,
+        major,
+    })
+}
 
-        let ratio = aggregate_rows[i + 1].median_cpa / current;
-        if ratio >= major_threshold {
-            knee_points.push(KneePoint {
-                index: i,
-                ratio,
+fn classify_knee_points(adjacents: &[(usize, f64)], thresholds: Thresholds) -> Vec<KneePoint> {
+    let mut points = Vec::new();
+    for (index, ratio) in adjacents {
+        if *ratio >= thresholds.major {
+            points.push(KneePoint {
+                index: *index,
+                ratio: *ratio,
                 class: KneeClass::Major,
             });
-        } else if ratio >= minor_threshold {
-            knee_points.push(KneePoint {
-                index: i,
-                ratio,
+        } else if *ratio >= thresholds.minor {
+            points.push(KneePoint {
+                index: *index,
+                ratio: *ratio,
                 class: KneeClass::Minor,
             });
         }
     }
+    points
+}
 
+fn merge_knee_points(points: &[KneePoint]) -> Vec<KneeZone> {
     let mut zones = Vec::<KneeZone>::new();
-    for point in knee_points {
-        if let Some(last) = zones.last_mut() {
-            let last_to_index = aggregate_rows
-                .iter()
-                .position(|row| row.size_bytes == last.to_size)
-                .unwrap_or(0)
-                .saturating_sub(1);
 
-            if point.index <= last_to_index + 1 {
-                last.to_size = aggregate_rows[point.index + 1].size_bytes;
+    for point in points {
+        if let Some(last) = zones.last_mut() {
+            if point.index <= last.end_index + 1 {
+                last.end_index = point.index;
                 if point.ratio > last.peak_ratio {
                     last.peak_ratio = point.ratio;
                 }
@@ -126,21 +146,90 @@ pub fn print_latency_inference_report(aggregate_rows: &[AggregateRow]) {
         }
 
         zones.push(KneeZone {
-            from_size: aggregate_rows[point.index].size_bytes,
-            to_size: aggregate_rows[point.index + 1].size_bytes,
+            start_index: point.index,
+            end_index: point.index,
             peak_ratio: point.ratio,
             class: point.class,
         });
     }
 
+    zones
+}
+
+fn infer_regions(rows: &[AggregateRow], zones: &[KneeZone]) -> Vec<Region> {
+    let labels = ["L1-like", "L2-like", "LLC-like", "DRAM-like"];
+    let mut boundaries = Vec::with_capacity(3);
+    for zone in zones.iter().take(3) {
+        boundaries.push(rows[(zone.end_index + 1).min(rows.len() - 1)].size_bytes);
+    }
+
+    let mut regions = Vec::new();
+    let mut start = rows.first().expect("non-empty").size_bytes;
+
+    for (i, boundary) in boundaries.iter().enumerate() {
+        regions.push(Region {
+            label: labels.get(i).copied().unwrap_or("post-knee-like"),
+            from_size: start,
+            to_size: *boundary,
+        });
+        start = *boundary;
+    }
+
+    regions.push(Region {
+        label: labels
+            .get(boundaries.len())
+            .copied()
+            .unwrap_or("post-knee-like"),
+        from_size: start,
+        to_size: rows.last().expect("non-empty").size_bytes,
+    });
+
+    regions
+}
+
+fn build_inference(rows: &[AggregateRow]) -> Option<InferenceResult> {
+    let adjacents = compute_adjacent_ratios(rows);
+    let ratio_values: Vec<f64> = adjacents.iter().map(|(_, ratio)| *ratio).collect();
+    let thresholds = compute_thresholds(&ratio_values)?;
+
+    let points = classify_knee_points(&adjacents, thresholds);
+    let zones = merge_knee_points(&points);
+    let regions = if zones.is_empty() {
+        Vec::new()
+    } else {
+        infer_regions(rows, &zones)
+    };
+
+    Some(InferenceResult {
+        thresholds,
+        zones,
+        regions,
+    })
+}
+
+pub fn print_latency_inference_report(aggregate_rows: &[AggregateRow]) {
     println!("Latency Inference Report");
-    println!("ratio_stats: P50={:.3} P90={:.3} P97={:.3}", p50, p90, p97);
+
+    if aggregate_rows.len() < 2 {
+        println!("insufficient points for inference");
+        return;
+    }
+
+    let Some(inference) = build_inference(aggregate_rows) else {
+        println!("no valid adjacent ratios for inference");
+        return;
+    };
+
+    println!(
+        "ratio_stats: P50={:.3} P90={:.3} P97={:.3}",
+        inference.thresholds.p50, inference.thresholds.p90, inference.thresholds.p97
+    );
     println!(
         "thresholds: minor={:.3} major={:.3}",
-        minor_threshold, major_threshold
+        inference.thresholds.minor, inference.thresholds.major
     );
 
-    if zones.is_empty() {
+    if inference.zones.is_empty() {
         println!("knees: none detected");
         println!(
             "regions: single regime across {} to {}",
@@ -149,43 +238,28 @@ pub fn print_latency_inference_report(aggregate_rows: &[AggregateRow]) {
         );
     } else {
         println!("knees:");
-        for zone in &zones {
+        for zone in &inference.zones {
+            let from_size = aggregate_rows[zone.start_index].size_bytes;
+            let to_size =
+                aggregate_rows[(zone.end_index + 1).min(aggregate_rows.len() - 1)].size_bytes;
             println!(
                 "- {} -> {}, peak_ratio={:.3}, class={}",
-                fmt_size(zone.from_size),
-                fmt_size(zone.to_size),
+                fmt_size(from_size),
+                fmt_size(to_size),
                 zone.peak_ratio,
                 class_name(zone.class)
             );
         }
 
-        let labels = ["L1-like", "L2-like", "LLC-like", "DRAM-like"];
-        let region_boundaries: Vec<u64> = zones.iter().take(3).map(|zone| zone.to_size).collect();
-
         println!("regions:");
-        let mut start = aggregate_rows.first().expect("non-empty").size_bytes;
-        for (i, boundary) in region_boundaries.iter().enumerate() {
-            let label = labels.get(i).copied().unwrap_or("post-knee-like");
+        for region in &inference.regions {
             println!(
                 "- {}: {} to {}",
-                label,
-                fmt_size(start),
-                fmt_size(*boundary)
+                region.label,
+                fmt_size(region.from_size),
+                fmt_size(region.to_size)
             );
-            start = *boundary;
         }
-
-        let final_label = labels
-            .get(region_boundaries.len())
-            .copied()
-            .unwrap_or("post-knee-like");
-        let end = aggregate_rows.last().expect("non-empty").size_bytes;
-        println!(
-            "- {}: {} to {}",
-            final_label,
-            fmt_size(start),
-            fmt_size(end)
-        );
     }
 
     println!(

@@ -1,21 +1,18 @@
+mod analysis;
+mod bench;
 mod config;
-mod cycle_builder;
-mod infer;
-mod output;
-mod pinning;
-mod size_grid;
-mod stats;
-mod timing;
+mod io;
+mod system;
 mod types;
 
+use analysis::infer::print_latency_inference_report;
+use analysis::stats::median_f64;
+use bench::cycle_builder::build_single_cycle;
+use bench::size_grid::build_sizes;
+use bench::timing::run_adaptive_trial;
 use config::Config;
-use cycle_builder::build_single_cycle;
-use infer::print_latency_inference_report;
-use output::write_results;
-use pinning::pin_to_core;
-use size_grid::build_sizes;
-use stats::median_f64;
-use timing::run_adaptive_trial;
+use io::output::write_results;
+use system::pinning::pin_to_core;
 use types::{AggregateRow, TrialRow};
 
 fn run_sweep(config: &Config, sizes: &[u64]) -> (Vec<TrialRow>, Vec<AggregateRow>) {

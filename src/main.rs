@@ -1,5 +1,6 @@
 mod config;
 mod cycle_builder;
+mod infer;
 mod output;
 mod pinning;
 mod size_grid;
@@ -9,6 +10,7 @@ mod types;
 
 use config::Config;
 use cycle_builder::build_single_cycle;
+use infer::print_latency_inference_report;
 use output::write_results;
 use pinning::pin_to_core;
 use size_grid::build_sizes;
@@ -87,6 +89,7 @@ fn main() {
     println!("total_sizes={}", sizes.len());
 
     let (raw_rows, aggregate_rows) = run_sweep(&config, &sizes);
+    print_latency_inference_report(&aggregate_rows);
     write_results(&config, pin_ok, &raw_rows, &aggregate_rows).expect("write output files");
 
     println!("wrote=results/latency.csv");

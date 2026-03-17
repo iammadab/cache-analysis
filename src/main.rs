@@ -5,6 +5,7 @@ const SEED: u64 = 0xC0FFEE;
 const V2_TRIAL_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 const CHUNK_ACCESSES: u64 = 65_536;
 const TARGET_CYCLES: u64 = 200_000_000;
+const PIN_CORE: usize = 0;
 
 // Builds a working-set grid with powers of two plus one midpoint between each pair.
 fn build_sizes(min_bytes: u64, max_bytes: u64) -> Vec<u64> {
@@ -107,10 +108,35 @@ fn run_adaptive_trial(next: &[u32], start_idx: u32) -> (u64, u64, u32) {
     }
 }
 
+fn pin_to_core(core_id: usize) -> Result<(), std::io::Error> {
+    let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::CPU_ZERO(&mut set);
+        libc::CPU_SET(core_id, &mut set);
+
+        let rc = libc::sched_setaffinity(
+            0,
+            std::mem::size_of::<libc::cpu_set_t>(),
+            &set as *const libc::cpu_set_t,
+        );
+
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
 fn main() {
+    match pin_to_core(PIN_CORE) {
+        Ok(()) => println!("pinned_core={PIN_CORE}"),
+        Err(err) => println!("pinning_warning={err}"),
+    }
+
     let sizes = build_sizes(MIN_BYTES, MAX_BYTES);
 
-    println!("Latency V2");
+    println!("Latency V3");
     println!("min_bytes={MIN_BYTES}");
     println!("max_bytes={MAX_BYTES}");
     println!("trials={TRIALS}");
